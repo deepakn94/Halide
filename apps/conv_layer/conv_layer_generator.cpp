@@ -10,52 +10,49 @@ public:
     Input<Buffer<float>>  filter{"filter", 4};
     Input<Buffer<float>>  bias{"bias", 1};
 
-    Output<Buffer<float>> f_ReLU{"ReLU", 4};
+    Output<Buffer<float>> f_conv{"conv", 4};
 
     void generate() {
         /* THE ALGORITHM */
 
         Var x("x"), y("y"), z("z"), n("n");
 
-        Func f_conv("conv");
-        RDom r(filter.dim(0).min(), filter.dim(0).extent(),
-               filter.dim(1).min(), filter.dim(1).extent(),
-               filter.dim(2).min(), filter.dim(2).extent());
+        RDom r(filter.dim(2).min(), filter.dim(2).extent(),
+               filter.dim(3).min(), filter.dim(3).extent(),
+               filter.dim(1).min(), filter.dim(1).extent());
 
-        f_conv(x, y, z, n) = bias(z);
+        f_conv(n, z, x, y) = bias(z);
 
-        f_conv(x, y, z, n) += filter(r.x, r.y, r.z, z) * input(x + r.x, y + r.y, r.z, n);
-
-        f_ReLU(x, y, z, n) = max(0, f_conv(x, y, z, n));
+        f_conv(n, z, x, y) += filter(z, r.z, r.x, r.y) * input(n, r.z, x + r.x, y + r.y);
 
         /* THE SCHEDULE */
 
         if (auto_schedule) {
             // Provide estimates on the input image
-            input.dim(0).set_bounds_estimate(0, 131);
-            input.dim(1).set_bounds_estimate(0, 131);
-            input.dim(2).set_bounds_estimate(0, 64);
-            input.dim(3).set_bounds_estimate(0, 4);
+            input.dim(0).set_bounds_estimate(0, 4);
+            input.dim(1).set_bounds_estimate(0, 64);
+            input.dim(2).set_bounds_estimate(0, 131);
+            input.dim(3).set_bounds_estimate(0, 131);
 
-            filter.dim(0).set_bounds_estimate(0, 3);
-            filter.dim(1).set_bounds_estimate(0, 3);
-            filter.dim(2).set_bounds_estimate(0, 64);
-            filter.dim(3).set_bounds_estimate(0, 64);
+            filter.dim(0).set_bounds_estimate(0, 64);
+            filter.dim(1).set_bounds_estimate(0, 64);
+            filter.dim(2).set_bounds_estimate(0, 3);
+            filter.dim(3).set_bounds_estimate(0, 3);
 
             bias.dim(0).set_bounds_estimate(0, 64);
 
-            // Provide estimates on the pipeline f_ReLU
-            f_ReLU.estimate(x, 0, 128)
+            // Provide estimates on the pipeline f_conv
+            f_conv.estimate(n, 0, 4)
+                .estimate(x, 0, 128)
                 .estimate(y, 0, 128)
-                .estimate(z, 0, 64)
-                .estimate(n, 0, 4);
+                .estimate(z, 0, 64);
 
         } /*else if (get_target().has_gpu_feature()) {
             // TODO: Turn off the manual GPU schedule for now.
             // For some reasons, it sometimes triggers the (err == CL_SUCCESS)
             // assertion on mingw.
             Var ni, no, xi, xo, yi, yo, zi, zo;
-            f_ReLU.compute_root()
+            f_conv.compute_root()
                 .split(x, xo, xi, 4)
                 .split(y, yo, yi, 4)
                 .split(z, zo, zi, 4)
@@ -63,7 +60,7 @@ public:
                 .gpu_threads(xi, yi, zi)
                 .gpu_blocks(xo, yo, zo);
 
-            f_conv.compute_at(f_ReLU, n)
+            f_conv.compute_at(f_conv, n)
                 .gpu_threads(x, y, z)
                 .update()
                 .unroll(r.x, 3)
@@ -87,7 +84,6 @@ public:
                 .unroll(r.y, 3)
                 .fuse(z, n, par)
                 .parallel(par);
-            f_ReLU.reorder(n, z).parallel(z).vectorize(x, 8);
         }
    }
 };
